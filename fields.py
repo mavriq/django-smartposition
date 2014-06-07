@@ -5,15 +5,6 @@ __all__ = ['SmartPositionField', ]
 
 from django.db.models.fields import PositiveIntegerField
 from django.db.models import F, signals
-from django.forms import Select
-
-
-def _shift(manager, field_name, start, end, direction):
-    if 0 == end:
-        return manager.filter(**{"%s__gte" % field_name: start}).update(**{field_name: F(field_name)+direction})
-    else:
-        return manager.select_for_update().filter(**{"%s__range" % field_name: (start, end)}).\
-            update(**{field_name: F(field_name)+direction})
 
 
 class SmartPositionField(PositiveIntegerField):
@@ -61,7 +52,7 @@ class SmartPositionField(PositiveIntegerField):
             if not (0 < position <= count):
                 position = count + 1
                 setattr(instance, self.attname, position)
-            return _shift(manager=manager, field_name=self.attname, start=position, end=0, direction=1)
+            return self._shift(manager=manager, field_name=self.attname, start=position, end=0, direction=1)
         orig_pos = getattr(orig, self.attname)
         if parent and getattr(orig, self.parent_field) != parent:
         ## parent есть, и он изменился
@@ -69,16 +60,26 @@ class SmartPositionField(PositiveIntegerField):
             setattr(instance, self.attname, count+1)
             ## "сшиваем" список оригинального parent-а
             manager = model.objects.select_for_update().filter(**{self.parent_field: getattr(orig, self.parent_field)})
-            return _shift(manager=manager, field_name=self.attname, start=orig_pos, end=0, direction=-1)
+            return self._shift(manager=manager, field_name=self.attname, start=orig_pos, end=0, direction=-1)
         elif position != orig_pos:
             ## parent не изменился или не указан, позиция изменилась
             if not 0 < position <= count:
                 position = count
                 setattr(instance, self.attname, position)
             if orig_pos < position:
-                return _shift(manager=manager, field_name=self.attname, start=orig_pos+1, end=position, direction=-1)
+                return self._shift(
+                    manager=manager,
+                    field_name=self.attname,
+                    start=orig_pos+1,
+                    end=position,
+                    direction=-1)
             else:
-                return _shift(manager=manager, field_name=self.attname, start=position, end=orig_pos-1, direction=1)
+                return self._shift(
+                    manager=manager,
+                    field_name=self.attname,
+                    start=position,
+                    end=orig_pos-1,
+                    direction=1)
 
     def _post_delete_position(self, instance, *args, **kwargs):
         position, manager = \
@@ -89,23 +90,12 @@ class SmartPositionField(PositiveIntegerField):
             manager = manager.filter(**{
                 self.parent_field: getattr(instance, self.parent_field)
             })
-        _shift(manager=manager, field_name=self.attname, start=position, end=0, direction=-1)
+        self._shift(manager=manager, field_name=self.attname, start=position, end=0, direction=-1)
 
-    # def get_choices(self, include_blank=True, blank_choice=BLANK_CHOICE_DASH):
-    #     """
-    #     Returns choices with a default blank choices included, for use as SelectField choices for this field.
-    #     """
-    #
-    #     pass
-
-
-    # def _shift(self, field_name, start, end, direction):
-    #     pass
-
-
-def _shift(manager, field_name, start, end, direction):
-    if 0 == end:
-        return manager.filter(**{"%s__gte" % field_name: start}).update(**{field_name: F(field_name)+direction})
-    else:
-        return manager.select_for_update().filter(**{"%s__range" % field_name: (start, end)}).\
-            update(**{field_name: F(field_name)+direction})
+    @staticmethod
+    def _shift(manager, field_name, start, end, direction):
+        if 0 == end:
+            return manager.filter(**{"%s__gte" % field_name: start}).update(**{field_name: F(field_name)+direction})
+        else:
+            return manager.select_for_update().filter(**{"%s__range" % field_name: (start, end)}).\
+                update(**{field_name: F(field_name)+direction})
